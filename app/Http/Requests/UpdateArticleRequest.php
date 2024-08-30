@@ -17,7 +17,7 @@ class UpdateArticleRequest extends FormRequest
             'libelle' => 'sometimes|required|max:255',
             'description' => 'sometimes|required',
             'price' => 'sometimes|required|numeric|min:0',
-            'stock' => 'sometimes|required|integer',
+            'stock' => 'sometimes|required|integer|min:0',
         ];
     }
 

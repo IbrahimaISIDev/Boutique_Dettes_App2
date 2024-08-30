@@ -2,17 +2,17 @@
 
 namespace App\Http\Controllers;
 
-use App\Http\Requests\StoreClientRequest;
-use App\Http\Resources\ClientCollection;
-use App\Http\Resources\ClientResource;
-use App\Models\Client;
 use App\Models\User;
+use App\Models\Client;
+use PHPUnit\Exception;
+use Illuminate\Http\Request;
 use App\Traits\RestResponseTrait;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use mysql_xdevapi\Exception;
 use Spatie\QueryBuilder\QueryBuilder;
+use App\Http\Resources\ClientResource;
+use App\Http\Resources\ClientCollection;
+use App\Http\Requests\StoreClientRequest;
 
 class ClientController extends Controller
 {

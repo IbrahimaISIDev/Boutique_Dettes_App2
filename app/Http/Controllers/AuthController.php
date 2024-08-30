@@ -36,13 +36,13 @@ class AuthController extends Controller
         return $this->sendResponse([
             'user' => $user,
             'access_token' => $token,
-            'token_full' => [
-                'id' => $tokenResult->accessToken->id,
-                'token' => $token,
-                'abilities' => $tokenResult->accessToken->abilities,
-            ],
+            // 'token_full' => [
+            //     'id' => $tokenResult->accessToken->id,
+            //     'token' => $token,
+            //     'abilities' => $tokenResult->accessToken->abilities,
+            // ],
             'refresh_token' => $refreshToken,
-            'token_type' => 'Bearer',
+            // 'token_type' => 'Bearer',
         ], StateEnum::SUCCESS, 'Connexion réussie');
     }
 
@@ -57,7 +57,6 @@ class AuthController extends Controller
         if (!$user) {
             return $this->sendResponse(null, StateEnum::ECHEC, 'Refresh token invalide', 401);
         }
-
         // Révoquer tous les tokens existants
         $user->tokens()->delete();
 
@@ -68,7 +67,7 @@ class AuthController extends Controller
 
         return $this->sendResponse([
             'access_token' => $token,
-            'refresh_token' => $refreshToken,
+            // 'refresh_token' => $refreshToken,
             'token_type' => 'Bearer',
         ], StateEnum::SUCCESS, 'Token rafraîchi avec succès');
     }
