@@ -3,17 +3,16 @@
 namespace App\Http\Controllers;
 
 use App\Models\User;
-use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\Hash;
-use App\Traits\RestResponseTrait;
 use App\Enums\StateEnum;
 use Illuminate\Support\Str;
+use Illuminate\Http\Request;
+use Illuminate\Routing\Controller;
+use Illuminate\Support\Facades\Auth;
+use Laravel\Passport\TokenRepository;
+use Laravel\Passport\RefreshTokenRepository;
 
 class AuthController extends Controller
 {
-    use RestResponseTrait;
-
     public function login(Request $request)
     {
         $request->validate([
@@ -27,8 +26,7 @@ class AuthController extends Controller
 
         $user = User::where('login', $request->login)->firstOrFail();
 
-        $tokenResult = $user->createToken('auth_token');
-        $token = $tokenResult->plainTextToken;
+        $token = $user->createToken('auth_token')->accessToken;
         $refreshToken = Str::random(60);
 
         $user->update(['refresh_token' => $refreshToken]);
@@ -36,13 +34,8 @@ class AuthController extends Controller
         return $this->sendResponse([
             'user' => $user,
             'access_token' => $token,
-            // 'token_full' => [
-            //     'id' => $tokenResult->accessToken->id,
-            //     'token' => $token,
-            //     'abilities' => $tokenResult->accessToken->abilities,
-            // ],
             'refresh_token' => $refreshToken,
-            // 'token_type' => 'Bearer',
+            'token_type' => 'Bearer',
         ], StateEnum::SUCCESS, 'Connexion réussie');
     }
 
@@ -57,26 +50,48 @@ class AuthController extends Controller
         if (!$user) {
             return $this->sendResponse(null, StateEnum::ECHEC, 'Refresh token invalide', 401);
         }
-        // Révoquer tous les tokens existants
-        $user->tokens()->delete();
 
-        $token = $user->createToken('auth_token')->plainTextToken;
+        // Révoquer tous les tokens existants
+        $tokenRepository = app(TokenRepository::class);
+        $refreshTokenRepository = app(RefreshTokenRepository::class);
+
+        $tokenRepository->revokeAccessToken($user->token()->id);
+        $refreshTokenRepository->revokeRefreshTokensByAccessTokenId($user->token()->id);
+
+        $token = $user->createToken('auth_token')->accessToken;
         $refreshToken = Str::random(60);
 
         $user->update(['refresh_token' => $refreshToken]);
 
         return $this->sendResponse([
             'access_token' => $token,
-            // 'refresh_token' => $refreshToken,
+            'refresh_token' => $refreshToken,
             'token_type' => 'Bearer',
         ], StateEnum::SUCCESS, 'Token rafraîchi avec succès');
     }
 
     public function logout(Request $request)
     {
-        $request->user()->currentAccessToken()->delete();
+        $tokenRepository = app(TokenRepository::class);
+        $refreshTokenRepository = app(RefreshTokenRepository::class);
+
+        // Révoquer le token d'accès
+        $tokenRepository->revokeAccessToken($request->user()->token()->id);
+
+        // Révoquer le refresh token associé
+        $refreshTokenRepository->revokeRefreshTokensByAccessTokenId($request->user()->token()->id);
+
         $request->user()->update(['refresh_token' => null]);
 
         return $this->sendResponse(null, StateEnum::SUCCESS, 'Déconnexion réussie');
+    }
+
+    public function sendResponse($result, $message)
+    {
+        return response()->json([
+            'success' => true,
+            'data'    => $result,
+            'message' => $message,
+        ]);
     }
 }

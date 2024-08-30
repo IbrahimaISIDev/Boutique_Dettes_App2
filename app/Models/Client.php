@@ -21,6 +21,7 @@ class Client extends Model
         //  'password',
         'created_at',
         'updated_at',
+        'deleted_at'
     ];
 
     function user() {
