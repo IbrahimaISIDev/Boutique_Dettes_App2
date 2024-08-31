@@ -11,7 +11,7 @@ class UserController extends Controller
     public function index()
     {
         $users = User::all();
-        return response()->json($users);
+        return $this->sendResponse($users, 'SUCCESS', 'Liste des utilisateurs récupérée avec succès');
     }
 
     public function store(Request $request)
@@ -32,12 +32,12 @@ class UserController extends Controller
             'role' => $request->role,
         ]);
 
-        return response()->json($user, 201);
+        return $this->sendResponse($user, 'SUCCESS', 'Utilisateur créé avec succès', 201);
     }
 
     public function show(User $user)
     {
-        return response()->json($user);
+        return $this->sendResponse($user, 'SUCCESS', 'Utilisateur récupéré avec succès');
     }
 
     public function update(Request $request, User $user)
@@ -52,12 +52,21 @@ class UserController extends Controller
 
         $user->update($request->all());
 
-        return response()->json($user);
+        return $this->sendResponse($user, 'SUCCESS', 'Utilisateur mis à jour avec succès');
     }
 
     public function destroy(User $user)
     {
         $user->delete();
-        return response()->json(null, 204);
+        return $this->sendResponse(null, 'SUCCESS', 'Utilisateur supprimé avec succès', 204);
+    }
+
+    private function sendResponse($data, $status, $message, $httpStatus = 200)
+    {
+        return response()->json([
+            'data'    => $data,
+            'status'  => $status,
+            'message' => $message,
+        ], $httpStatus);
     }
 }
