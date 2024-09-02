@@ -2,27 +2,92 @@
 
 namespace App\Http\Controllers;
 
+use Exception;
 use App\Models\Article;
+use App\Enums\StateEnum;
 use Illuminate\Http\Request;
-use App\Http\Controllers\Controller;
+use App\Traits\RestResponseTrait;
 use Illuminate\Support\Facades\DB;
+use App\Http\Controllers\Controller;
+use App\Http\Resources\ArticleResource;
 use App\Http\Requests\StoreArticleRequest;
 use App\Http\Requests\UpdateArticleRequest;
-use App\Traits\RestResponseTrait;
-use App\Enums\StateEnum;
 
 class ArticleController extends Controller
 {
     use RestResponseTrait;
 
-    public function index()
+    protected function authorizationFailed()
     {
-        $articles = Article::all();
+        return $this->sendResponse(null, StateEnum::ECHEC, 'Permission refusée', 403);
+    }
+
+    // public function index()
+    // {
+        
+
+    //     $articles = Article::all();
+    //     return $this->sendResponse($articles, StateEnum::SUCCESS, 'Articles récupérés avec succès');
+    // }
+
+    public function index(Request $request)
+    {
+        if (!$this->authorize('viewAny', Article::class)) {
+            return $this->authorizationFailed();
+        }
+        $disponible = $request->query('disponible');
+
+        $query = Article::query();
+
+        // Filtrer par disponibilité en stock
+        if ($disponible !== null) {
+            if ($disponible === 'oui') {
+                $query->where('stock', '>', 0);
+            } elseif ($disponible === 'non') {
+                $query->where('stock', '=', 0);
+            } else {
+                return $this->sendResponse(null, StateEnum::ECHEC, 'Valeur de filtre "disponible" invalide', 422);
+            }
+        }
+
+        $articles = $query->get();
+
         return $this->sendResponse($articles, StateEnum::SUCCESS, 'Articles récupérés avec succès');
     }
 
+    public function getByLibelle(Request $request)
+{
+    if (!$this->authorize('viewAny', Article::class)) {
+        return $this->authorizationFailed();
+    }
+
+    $libelle = $request->input('libelle');
+
+    if (empty($libelle)) {
+        return $this->sendResponse(null, StateEnum::ECHEC, 'Le libelle est requis', 422);
+    }
+
+    $article = Article::where('libelle', $libelle)->first();
+
+    if (!$article) {
+        return $this->sendResponse(null, StateEnum::ECHEC, 'Article non trouvé', 404);
+    }
+
+    // Now, authorize the specific article
+    if (!$this->authorize('view', $article)) {
+        return $this->authorizationFailed();
+    }
+
+    return $this->sendResponse($article, StateEnum::SUCCESS, 'Article récupéré avec succès');
+}
+
+
     public function store(StoreArticleRequest $request)
     {
+        if (!$this->authorize('create', Article::class)) {
+            return $this->authorizationFailed();
+        }
+
         $validatedData = $request->validated();
 
         if (empty($validatedData)) {
@@ -36,11 +101,19 @@ class ArticleController extends Controller
 
     public function show(Article $article)
     {
+        if (!$this->authorize('view', $article)) {
+            return $this->authorizationFailed();
+        }
+
         return $this->sendResponse($article, StateEnum::SUCCESS, 'Article récupéré avec succès');
     }
 
     public function update(UpdateArticleRequest $request, Article $article)
     {
+        if (!$this->authorize('update', $article)) {
+            return $this->authorizationFailed();
+        }
+
         $validatedData = $request->validated();
 
         if (empty($validatedData)) {
@@ -58,12 +131,20 @@ class ArticleController extends Controller
 
     public function destroy(Article $article)
     {
+        if (!$this->authorize('delete', $article)) {
+            return $this->authorizationFailed();
+        }
+
         $article->delete();
         return $this->sendResponse(null, StateEnum::SUCCESS, 'Article supprimé avec succès');
     }
 
     public function trashed()
     {
+        if (!$this->authorize('viewAny', Article::class)) {
+            return $this->authorizationFailed();
+        }
+
         $trashedArticles = Article::onlyTrashed()->get();
         return $this->sendResponse($trashedArticles, StateEnum::SUCCESS, 'Articles supprimés récupérés avec succès');
     }
@@ -71,6 +152,11 @@ class ArticleController extends Controller
     public function restore($id)
     {
         $article = Article::withTrashed()->findOrFail($id);
+        
+        if (!$this->authorize('restore', $article)) {
+            return $this->authorizationFailed();
+        }
+
         if (!$article->trashed()) {
             return $this->sendResponse(null, StateEnum::ECHEC, 'Cet article n\'est pas dans la corbeille', 400);
         }
@@ -81,6 +167,11 @@ class ArticleController extends Controller
     public function forceDelete($id)
     {
         $article = Article::withTrashed()->findOrFail($id);
+        
+        if (!$this->authorize('forceDelete', $article)) {
+            return $this->authorizationFailed();
+        }
+
         if (!$article->trashed()) {
             return $this->sendResponse(null, StateEnum::ECHEC, 'Vous ne pouvez pas supprimer définitivement un article qui n\'est pas dans la corbeille', 400);
         }
@@ -90,10 +181,24 @@ class ArticleController extends Controller
 
     public function updateMultiple(Request $request)
     {
+        if (!$this->authorize('updateAny', Article::class)) {
+            return $this->authorizationFailed();
+        }
+
         $articlesToUpdate = $request->articles;
 
         if (empty($articlesToUpdate)) {
             return $this->sendResponse(null, StateEnum::ECHEC, 'Au moins un article est requis pour la mise à jour multiple', 422);
+        }
+
+        $ids = array_column($articlesToUpdate, 'id');
+        $duplicateIds = array_filter(array_count_values($ids), function($count) {
+            return $count > 1;
+        });
+
+        if (!empty($duplicateIds)) {
+            $duplicateMessage = "Les ID suivants apparaissent plusieurs fois : " . implode(', ', array_keys($duplicateIds));
+            return $this->sendResponse(['duplicate_ids' => $duplicateIds], StateEnum::ECHEC, $duplicateMessage, 422);
         }
 
         $updatedArticles = [];
@@ -111,6 +216,10 @@ class ArticleController extends Controller
                     $article = Article::find($articleData['id']);
                     if (!$article) {
                         throw new \Exception("Article avec l'ID {$articleData['id']} introuvable");
+                    }
+
+                    if (!$this->authorize('update', $article)) {
+                        throw new \Exception("Non autorisé à mettre à jour l'article avec l'ID {$articleData['id']}");
                     }
 
                     $updateRequest = new UpdateArticleRequest();

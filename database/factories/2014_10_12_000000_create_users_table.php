@@ -1,6 +1,7 @@
 <?php
 
 use App\Enums\RoleEnum;
+use App\Enums\EtatEnum;
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
@@ -17,8 +18,10 @@ return new class extends Migration
             $table->string('nom');
             $table->string('prenom');
             $table->string('login')->unique();
-            $table->enum('role', array_column(RoleEnum::cases(), 'value'));
+            $table->foreignId('role_id')->constrained('roles')->onDelete('cascade');
             $table->string('password');
+            $table->enum('etat', array_column(EtatEnum::cases(), 'value'))->nullable();
+            $table->string('photo')->nullable(); 
             $table->timestamps();
         });
     }

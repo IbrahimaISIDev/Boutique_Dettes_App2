@@ -2,7 +2,7 @@
 
 namespace App\Http\Requests;
 
-use App\Enums\RoleEnum;
+use App\Enums\EtatEnum;
 use App\Enums\StateEnum;
 use App\Enums\UserRole;
 use App\Rules\CustumPasswordRule;
@@ -31,9 +31,10 @@ class StoreUserRequest extends FormRequest
         return [
             'nom' => 'required|string|max:255',
             'prenom' => 'required|string|max:255',
-            'login' => 'required|string|max:255|unique:users,login',
-            'role' => ['required', 'in:' . implode(',', array_column(RoleEnum::cases(), 'value'))],
-          //  'email' => 'required|email|unique:users,email',
+            'login' => 'required|string|unique:users|max:255',
+            'role_id' => 'required|numeric|exists:roles,id',
+            'photo' => 'nullable|image|mimes:jpeg,png,jpg,gif|max:2048', 
+            'etat' => 'required|string|in:' . implode(',', array_map(fn($case) => $case->value, EtatEnum::cases())),
             'password' =>['confirmed', new CustumPasswordRule()],
         ];
     }

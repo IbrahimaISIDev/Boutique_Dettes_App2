@@ -2,46 +2,75 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\User;
 use App\Models\Client;
+use App\Models\User;
 use Exception;
 use Illuminate\Http\Request;
-use App\Traits\RestResponseTrait;
+use App\Helpers\ResponseHelper;
+use App\Enums\EtatEnum;
 use Illuminate\Support\Facades\DB;
 use Spatie\QueryBuilder\QueryBuilder;
 use App\Http\Resources\ClientResource;
 use App\Http\Resources\ClientCollection;
 use App\Http\Requests\StoreClientRequest;
+use Illuminate\Support\Facades\Hash;
 
 class ClientController extends Controller
 {
-    use RestResponseTrait;
-
-    /**
-     * Display a listing of the resource.
-     */
-    public function index(Request $request)
+    protected function authorizationFailed()
     {
-        $include = $request->has('include') ? [$request->input('include')] : [];
-
-        $clients = QueryBuilder::for(Client::class)
-            ->allowedFilters(['surname'])
-            ->allowedIncludes(['user'])
-            ->get();
-
-        return $this->sendResponse(new ClientCollection($clients), 'SUCCESS', 'Liste des clients récupérée avec succès');
+        return ResponseHelper::sendForbidden('Permission refusée');
     }
 
-    /**
-     * Store a newly created resource in storage.
-     */
+    public function index(Request $request)
+    {
+        if (!$this->authorize('viewAny', Client::class)) {
+            return $this->authorizationFailed();
+        }
+
+        $comptes = $request->query('comptes');
+        $active = $request->query('active');
+
+        $query = QueryBuilder::for(Client::class)
+            ->allowedFilters(['surname'])
+            ->allowedIncludes(['user']);
+
+        if ($comptes !== null) {
+            if ($comptes === 'oui') {
+                $query->whereHas('user');
+            } elseif ($comptes === 'non') {
+                $query->whereDoesntHave('user');
+            }
+        }
+
+        if ($active !== null) {
+            $etat = $active === 'oui' ? EtatEnum::ACTIF->value : EtatEnum::INACTIF->value;
+            $query->whereHas('user', function ($query) use ($etat) {
+                $query->where('etat', $etat);
+            });
+        }
+
+        $clients = $query->get();
+
+        return ResponseHelper::sendOk(new ClientCollection($clients), 'Liste des clients récupérée avec succès');
+    }
+
     public function store(StoreClientRequest $request)
     {
+        if (!$this->authorize('create', Client::class)) {
+            return $this->authorizationFailed();
+        }
+
         try {
             DB::beginTransaction();
 
             $clientRequest = $request->only('surname', 'adresse', 'telephone');
             $client = Client::create($clientRequest);
+
+            $path = null;
+            if ($request->hasFile('photo')) {
+                $path = $request->file('photo')->store('photos', 'public');
+            }
 
             if ($request->has('user')) {
                 $user = User::create([
@@ -49,42 +78,114 @@ class ClientController extends Controller
                     'prenom' => $request->input('user.prenom'),
                     'login' => $request->input('user.login'),
                     'password' => bcrypt($request->input('user.password')),
-                    'role' => $request->input('user.role'),
+                    'role_id' => $request->input('user.role_id'),
+                    'photo' => $path,
+                    'etat' => $request->input('user.etat') ?? 'ACTIF',
                 ]);
 
                 $user->client()->save($client);
             }
 
             DB::commit();
-            return $this->sendResponse(new ClientResource($client), 'SUCCESS', 'Client créé avec succès', 201);
+            return ResponseHelper::sendCreated(new ClientResource($client), 'Client créé avec succès');
         } catch (Exception $e) {
             DB::rollBack();
-            return $this->sendResponse(null, 'ECHEC', 'Erreur lors de la création du client : ' . $e->getMessage(), 500);
+            return ResponseHelper::sendServerError('Erreur lors de la création du client : ' . $e->getMessage());
         }
     }
 
-    /**
-     * Display the specified resource.
-     */
     public function show(string $id)
     {
+        $client = Client::findOrFail($id);
+        if (!$this->authorize('view', $client)) {
+            return $this->authorizationFailed();
+        }
+
+        return ResponseHelper::sendOk(new ClientResource($client), 'Client récupéré avec succès');
+    }
+
+    public function update(Request $request, Client $client)
+    {
+        if (!$this->authorize('update', $client)) {
+            return $this->authorizationFailed();
+        }
+
+        // Logique de mise à jour du client
+        $client->update($request->validated());
+
+        return ResponseHelper::sendOk(new ClientResource($client), 'Client mis à jour avec succès');
+    }
+
+    public function destroy(Client $client)
+    {
+        if (!$this->authorize('delete', $client)) {
+            return $this->authorizationFailed();
+        }
+
+        $client->delete();
+
+        return ResponseHelper::sendOk(null, 'Client supprimé avec succès');
+    }
+
+    public function getByPhoneNumber(Request $request)
+    {
+        $request->validate([
+            'telephone' => 'required|string',
+        ]);
+
         try {
-            $client = Client::findOrFail($id);
-            return $this->sendResponse(new ClientResource($client), 'SUCCESS', 'Client récupéré avec succès');
+            $client = Client::where('telephone', $request->telephone)->firstOrFail();
+            if (!$this->authorize('view', $client)) {
+                return $this->authorizationFailed();
+            }
+            return ResponseHelper::sendOk(new ClientResource($client), 'Client récupéré avec succès');
         } catch (Exception $e) {
-            return $this->sendResponse(null, 'ECHEC', 'Erreur lors de la récupération du client : ' . $e->getMessage(), 404);
+            return ResponseHelper::sendNotFound('Client non trouvé avec ce numéro de téléphone');
         }
     }
 
-    /**
-     * Method to send a response in the desired format.
-     */
-    private function sendResponse($data, $status, $message, $httpStatus = 200)
+    public function addAccount(Request $request)
     {
-        return response()->json([
-            'data'    => $data,
-            'status'  => $status,
-            'message' => $message,
-        ], $httpStatus);
+        if (!$this->authorize('create', Client::class)) {
+            return $this->authorizationFailed();
+        }
+
+        $request->validate([
+            'surname' => 'required|string|exists:clients,surname',
+            'user.nom' => 'required|string|max:255',
+            'user.prenom' => 'required|string|max:255',
+            'user.login' => 'required|string|unique:users,login|max:255',
+            'user.password' => 'required|string|min:6|confirmed',
+            'user.role_id' => 'required|exists:roles,id',
+            'user.etat' => 'required|string|in:' . implode(',', array_map(fn($case) => $case->value, EtatEnum::cases())),
+        ]);
+
+        try {
+            DB::beginTransaction();
+
+            $client = Client::where('surname', $request->surname)->firstOrFail();
+
+            if ($client->user()->exists()) {
+                return ResponseHelper::sendBadRequest('Ce client a déjà un compte utilisateur associé.');
+            }
+
+            $user = User::create([
+                'nom' => $request->user['nom'],
+                'prenom' => $request->user['prenom'],
+                'login' => $request->user['login'],
+                'password' => Hash::make($request->user['password']),
+                'role_id' => $request->user['role_id'],
+                'etat' => $request->user['etat'],
+            ]);
+
+            $client->user()->associate($user);
+            $client->save();
+
+            DB::commit();
+            return ResponseHelper::sendCreated(new ClientResource($client), 'Compte ajouté au client avec succès');
+        } catch (Exception $e) {
+            DB::rollBack();
+            return ResponseHelper::sendServerError('Erreur lors de l\'ajout du compte au client : ' . $e->getMessage());
+        }
     }
 }
